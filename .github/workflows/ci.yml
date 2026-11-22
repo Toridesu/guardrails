@@ -70,6 +70,9 @@ jobs:
       - name: Checkov（各チェックが効くか）
         run: python scripts/test_checkov_fixtures.py
 
+      - name: SCP・RCP で拒否されるか（手元でまねる簡易版）
+        run: python scripts/test_policy_cases.py
+
       - name: 対応表とコードのずれ
         run: python scripts/check_mapping.py
 
