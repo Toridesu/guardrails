@@ -48,7 +48,15 @@ step "プルリクエストを出す"
 must gh pr create --base "$base" --head "$branch" \
   --title "demo5: 違反を含む変更（マージしない）" \
   --body "デモ5（C11）。CI の Checkov が失敗し、ブランチ保護でマージできないことを確かめる。"
-pr="$(tail -1 <<<"$_out")" # gh は最後の行にプルリクエストの URL を出す
+# gh は URL のほかに、注意書き（hint など）を出すことがある。URL の形の部分だけを取り出す
+pr="$(grep -oE 'https://github\.com/[^[:space:]]+/pull/[0-9]+' <<<"$_out" | tail -1)"
+if [[ -z "$pr" ]]; then
+  if [[ "$DRY_RUN" != 1 ]]; then
+    ng "gh の出力から、プルリクエストの URL を読み取れない"
+    exit 1
+  fi
+  pr="(DRY_RUN)"
+fi
 printf '  %s\n' "$pr"
 
 step "CI の結果を待つ"
@@ -73,16 +81,17 @@ fi
 
 step "マージできない状態か（ブランチ保護）"
 if [[ "$DRY_RUN" != 1 ]]; then
-  # 判定に少し時間がかかることがある（UNKNOWN）
+  # 判定に少し時間がかかることがある（UNKNOWN）。注意書きの行が混ざっても、状態の行だけを取り出す
   for _ in $(seq 6); do
     run gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus
-    [[ "$_out" != UNKNOWN ]] && break
+    state="$(grep -oE '^(BEHIND|BLOCKED|CLEAN|DIRTY|DRAFT|HAS_HOOKS|UNKNOWN|UNSTABLE)$' <<<"$_out" | tail -1)"
+    [[ -n "$state" && "$state" != UNKNOWN ]] && break
     sleep 5
   done
-  case "$_out" in
+  case "$state" in
   BLOCKED) ok "マージできない（BLOCKED）" ;;
   UNSTABLE) ng "CI は失敗したが、マージできてしまう（UNSTABLE）。ブランチ保護で CI を必須にする" ;;
-  *) ng "想定外の状態：$_out" ;;
+  *) ng "想定外の状態：${state:-読み取れない}" ;;
   esac
 else
   run gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus
