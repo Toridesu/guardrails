@@ -1,0 +1,30 @@
+metadata:
+  id: "CKV2_GR_C05_1"
+  name: "C05: アカウント単位の S3 パブリックアクセスブロックは4項目すべて有効にする"
+  category: "GENERAL_SECURITY"
+definition:
+  and:
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_s3_account_public_access_block"
+      attribute: "block_public_acls"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_s3_account_public_access_block"
+      attribute: "block_public_policy"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_s3_account_public_access_block"
+      attribute: "ignore_public_acls"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_s3_account_public_access_block"
+      attribute: "restrict_public_buckets"
+      operator: "equals"
+      value: true

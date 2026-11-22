@@ -1,0 +1,22 @@
+# CI と手元で使う Checkov の設定。リポジトリのルートで実行する。
+# 統制に関係するチェックだけを実行する（全部入れると、統制と関係ない指摘でマージが止まる）。
+# CIS 由来のパスワード規則（CKV_AWS_9〜15）は、C12 の判断（NIST SP 800-63B-4 に合わせる）により使わない。
+framework:
+  - terraform
+external-checks-dir:
+  - checkov
+check:
+  - CKV_AWS_3 # C04 EBS ボリュームの暗号化
+  - CKV_AWS_8 # C04 EC2 のブロックデバイスの暗号化
+  - CKV_AWS_24 # C10 0.0.0.0/0 から22番
+  - CKV_AWS_25 # C10 0.0.0.0/0 から3389番
+  - CKV_AWS_36 # C02 ログファイルの検証
+  - CKV_AWS_67 # C02 マルチリージョンの証跡
+  - CKV2_GR_C02_1 # C02（カスタム）
+  - CKV2_GR_C04_1 # C04（カスタム）
+  - CKV2_GR_C05_1 # C05（カスタム）
+  - CKV2_GR_C10_1 # C10（カスタム、IPv6）
+compact: true
+# terraform test のファイル（*.tftest.hcl）は Checkov では読めず、確かめる対象でもないので外す
+skip-path:
+  - \.tftest\.hcl$

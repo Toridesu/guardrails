@@ -1,0 +1,77 @@
+# プルリクエストのたびに、AWS に触れずにできる確認をすべて回す（C11）。
+# ブランチ保護で、この2つのジョブを必須にする（設定は GitHub の画面で行う）。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: terraform（fmt、validate、test）
+    runs-on: ubuntu-latest
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tf-plugin-cache
+      TF_IN_AUTOMATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+
+      # AWS プロバイダーは大きいので、ロックファイルが変わらない限り使い回す
+      - uses: actions/cache@v4
+        with:
+          path: .tf-plugin-cache
+          key: tf-plugins-${{ runner.os }}-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+
+      - name: 書式（fmt）
+        run: terraform fmt -check -recursive -diff terraform tests/fixtures
+
+      # backend を使わずに初期化するので、AWS の認証情報はいらない。
+      # test は mock_provider（AWS の代わりに偽の値を返す）で動くので、これも AWS に接続しない
+      - name: 構文と参照（validate）、テスト（test）
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          for dir in org policies logging detection remediation; do
+            echo "::group::$dir"
+            terraform -chdir="terraform/$dir" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="terraform/$dir" validate
+            if [ -d "terraform/$dir/tests" ]; then
+              terraform -chdir="terraform/$dir" test
+            fi
+            echo "::endgroup::"
+          done
+
+  policy:
+    name: checkov と対応表
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: パッケージを入れる
+        run: pip install -r requirements-dev.txt
+
+      - name: Checkov（本物のコード）
+        run: checkov -d terraform --config-file .checkov.yaml
+
+      - name: Checkov（各チェックが効くか）
+        run: python scripts/test_checkov_fixtures.py
+
+      - name: 対応表とコードのずれ
+        run: python scripts/check_mapping.py
+
+      - name: mapping.md が最新か
+        run: python scripts/gen_mapping.py --check

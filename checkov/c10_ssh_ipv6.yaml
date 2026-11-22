@@ -1,0 +1,26 @@
+# 組み込みの CKV_AWS_24 は IPv4（0.0.0.0/0）を見る。こちらは IPv6（::/0）からの22番の開放を止める。
+# 違反になるのは「::/0 から」かつ「ポート範囲に22番を含む」とき。
+metadata:
+  id: "CKV2_GR_C10_1"
+  name: "C10: IPv6 の全体（::/0）に22番ポートを開けない（ポート範囲を含む）"
+  category: "NETWORKING"
+definition:
+  or:
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_vpc_security_group_ingress_rule"
+      attribute: "cidr_ipv6"
+      operator: "not_equals"
+      value: "::/0"
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_vpc_security_group_ingress_rule"
+      attribute: "from_port"
+      operator: "greater_than"
+      value: 22
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_vpc_security_group_ingress_rule"
+      attribute: "to_port"
+      operator: "less_than"
+      value: 22

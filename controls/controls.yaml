@@ -1,0 +1,214 @@
+# 統制の一覧（正）。docs/mapping.md はここから生成する（scripts/gen_mapping.py）。
+#
+# prevent / detect / remediate / evidence には、次の形で実装を書く。
+#   - scp: <Sid>               terraform/policies/scp/*.json の Sid
+#   - rcp: <Sid>               terraform/policies/rcp/*.json の Sid
+#   - config_rule: <ルール名>  Terraform 内のルール名
+#   - securityhub: <ID>        Terraform で有効にした Security Hub CSPM のコントロール
+#   - terraform: <型.名前>     Terraform のリソース（例 aws_cloudtrail.org）
+#   - ssm_document: <名前>     Terraform で参照している SSM ドキュメント
+#   - checkov: <ID>            .checkov.yaml で有効にした Checkov のチェック（CI で変更前に止める）
+#   - manual: <説明>           コードにできないもの（存在の確認はしない）
+#   - "<文字列>"               説明だけ（evidence で使う）
+# scripts/check_mapping.py が、manual と文字列以外がコードに実在するかを確かめる。
+
+standards:
+  fisc: 未定（第13版か第14版に固定してから記入する）
+  nist_800_53: NIST SP 800-53 Rev.5（対応先は仮置き。Security Hub CSPM の対応と突き合わせて確定する）
+  nist_800_63b: NIST SP 800-63B-4
+
+controls:
+  - id: C01
+    requirement: 利用リージョンを東京と大阪に限る（大阪は Bedrock の推論だけ）
+    prevent:
+      - scp: C01DenyOutsideAllowedRegions
+      - scp: C01DenyOsakaExceptBedrock
+    detect: []
+    remediate: []
+    evidence:
+      - CloudTrail の拒否記録
+      - terraform: aws_cloudtrail.org
+    nist_800_53: [SA-9(5)]
+    fisc: []
+    notes: >-
+      大阪は P3 の Bedrock（jp. で始まる推論プロファイル）の推論先としてだけ許可する。
+      許可外のリージョンでの拒否も記録するため、組織証跡はマルチリージョンにしている。
+
+  - id: C02
+    requirement: 監査ログを止めさせない、消させない
+    prevent:
+      - terraform: aws_cloudtrail.org
+      - scp: C02DenyCloudTrailChanges
+      - scp: C02ProtectLogBucket
+      - terraform: aws_s3_bucket_object_lock_configuration.logs
+      - checkov: CKV_AWS_36
+      - checkov: CKV_AWS_67
+      - checkov: CKV2_GR_C02_1
+    detect:
+      - securityhub: CloudTrail.1
+      - securityhub: CloudTrail.4
+    remediate: []
+    evidence:
+      - ログファイルの検証（ダイジェスト）
+    nist_800_53: [AU-9, AU-12]
+    fisc: []
+    notes: >-
+      組織証跡はメンバーアカウントからは変更できない。Object Lock は学習用なのでガバナンスモードで1日にしている。
+
+  - id: C03
+    requirement: 構成の記録を止めさせない
+    prevent:
+      - scp: C03DenyConfigChanges
+    detect:
+      - securityhub: Config.1
+    remediate: []
+    evidence:
+      - Config の記録履歴
+      - terraform: aws_config_configuration_aggregator.org
+    nist_800_53: [CM-8, CA-7]
+    fisc: []
+    notes: >-
+      停止と削除のほか、記録対象を空にする PutConfigurationRecorder と、ルールや修復設定の削除も拒否する。
+
+  - id: C04
+    requirement: 保存データを暗号化する（EBS）
+    prevent:
+      - terraform: aws_ebs_encryption_by_default.this
+      - scp: C04DenyDisableEbsDefaultEncryption
+      - checkov: CKV_AWS_3
+      - checkov: CKV_AWS_8
+      - checkov: CKV2_GR_C04_1
+    detect:
+      - config_rule: c04-encrypted-volumes
+      - securityhub: EC2.7
+    remediate: []
+    evidence:
+      - Config の評価履歴
+    nist_800_53: [SC-28]
+    fisc: []
+
+  - id: C05
+    requirement: S3 を公開させない
+    prevent:
+      - terraform: aws_s3_account_public_access_block.this
+      - scp: C05DenyAccountPublicAccessBlockChange
+      - checkov: CKV2_GR_C05_1
+    detect:
+      - securityhub: S3.1
+    remediate: []
+    evidence:
+      - Config の評価履歴
+    nist_800_53: [AC-3, SC-7]
+    fisc: []
+
+  - id: C06
+    requirement: 通信を暗号化する（S3 は TLS 必須）
+    prevent:
+      - rcp: C06DenyS3WithoutTLS
+      - terraform: aws_s3_bucket_policy.logs
+    detect:
+      - config_rule: c06-s3-bucket-ssl-requests-only
+      - securityhub: S3.5
+    remediate: []
+    evidence:
+      - CloudTrail の拒否記録（GetObject などはデータイベントなので、データイベントを有効にしたバケットだけ）
+    nist_800_53: [SC-8]
+    fisc: []
+    notes: >-
+      Config のルールはバケットポリシーしか見ないので、RCP で防いでいても違反と出る。
+      ログバケットにはバケットポリシーでも TLS 必須を書いた。ほかのバケットで違反と出たら、理由を付けて抑制する。
+
+  - id: C07
+    requirement: 長期の認証情報を作らせない
+    prevent:
+      - scp: C07DenyLongTermCredentials
+    detect: []
+    remediate: []
+    evidence:
+      - CloudTrail の拒否記録
+    nist_800_53: [IA-5, AC-2]
+    fisc: []
+    notes: >-
+      IAM ユーザーそのものを作らせないので、検知の対象がない。人は Identity Center、システムはロールを使う。
+
+  - id: C08
+    requirement: 人のログインは MFA 必須
+    prevent:
+      - manual: IAM Identity Center で MFA を必須にする（コンソールでしか設定できない）
+      - terraform: aws_ssoadmin_permission_set.admin
+    detect: []
+    remediate: []
+    evidence:
+      - 設定画面の記録と手順書
+    nist_800_53: [IA-2(1)]
+    nist_800_63b: [AAL2]
+    fisc: []
+    notes: >-
+      MFA が未登録の人にメールでワンタイムパスワードを送る設定にはしない（800-63B ではメールを帯域外の認証器に使えない）。
+      未登録のときは、サインイン時に登録を必須にする。
+
+  - id: C09
+    requirement: メンバーアカウントのルートを使わせない
+    prevent:
+      - terraform: aws_iam_organizations_features.root_access
+      - scp: C09DenyRootUser
+    detect:
+      - securityhub: IAM.4
+    remediate: []
+    evidence:
+      - CloudTrail の拒否記録
+    nist_800_53: [AC-6]
+    fisc: []
+
+  - id: C10
+    requirement: 管理用ポートを全世界に開けさせない
+    prevent:
+      - manual: 実行時の防止はなし（開放先の CIDR を IAM の条件で判定できない）。Terraform の変更は CI で事前に止める（C11）
+      - checkov: CKV_AWS_24
+      - checkov: CKV_AWS_25
+      - checkov: CKV2_GR_C10_1
+    detect:
+      - config_rule: c10-restricted-ssh
+      - securityhub: EC2.13
+    remediate:
+      - terraform: aws_config_remediation_configuration.c10
+      - ssm_document: AWS-DisablePublicAccessForSecurityGroup
+    evidence:
+      - 修復の実行履歴と所要時間（中央値と最大値）
+    nist_800_53: [SC-7, CM-7]
+    fisc: []
+
+  - id: C11
+    requirement: 違反を含む変更を反映させない
+    prevent:
+      - manual: Checkov が失敗したプルリクエストはマージできない（ブランチ保護）
+    detect: []
+    remediate: []
+    evidence:
+      - プルリクエストと CI の履歴
+      - 各チェックが効くことを、違反ありと違反なしのサンプルで確かめる（scripts/test_checkov_fixtures.py）
+    nist_800_53: [CM-3]
+    fisc: []
+    notes: >-
+      Checkov は統制に関係するチェックだけを有効にする（.checkov.yaml）。各チェックの ID は、対応する統制（C02、C04、C05、C10）の防止の欄に書く。
+      CIS 由来のパスワード規則（CKV_AWS_9〜15）は、C12 の判断により使わない。
+
+  - id: C12
+    requirement: パスワードの規則（基準の衝突）
+    prevent:
+      - manual: C07 で IAM ユーザー自体を作らせない
+      - terraform: aws_iam_account_password_policy.this
+    detect:
+      - config_rule: c12-iam-password-policy
+    remediate: []
+    evidence:
+      - 判断の記録（この notes）
+    nist_800_53: [IA-5(1)]
+    nist_800_63b: [3.1.1.2]
+    fisc: []
+    notes: >-
+      Config の iam-password-policy は既定で大文字・小文字・数字・記号を求めるが、
+      800-63B-4 は文字種の組み合わせ規則を課してはならないとする。800-63B-4 に合わせ、文字種は求めず長さ15文字以上を見る設定にした。
+      ただし人が実際に使うのは Identity Center のパスワードで、文字種が必須かつ変更できないとされる（要確認）。
+      ここは同じ衝突が設定では解けないので、MFA 必須（C08）で補い、残るリスクとして記録する。
+      IAM のパスワードポリシーでは、800-63B-4 が求めるブロックリストとの照合もできない。

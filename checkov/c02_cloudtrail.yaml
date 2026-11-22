@@ -1,0 +1,18 @@
+metadata:
+  id: "CKV2_GR_C02_1"
+  name: "C02: CloudTrail はマルチリージョンにし、ログファイルの検証を有効にする"
+  category: "LOGGING"
+definition:
+  and:
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_cloudtrail"
+      attribute: "is_multi_region_trail"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types:
+        - "aws_cloudtrail"
+      attribute: "enable_log_file_validation"
+      operator: "equals"
+      value: true

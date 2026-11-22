@@ -1,0 +1,11 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+terraform/backend.hcl
+terraform/shared.env
+.venv/
+__pycache__/
+.tools/
+scripts/demo/demo.env

@@ -1,0 +1,11 @@
+metadata:
+  id: "CKV2_GR_C04_1"
+  name: "C04: EBS ボリュームは暗号化する（encrypted を明示する）"
+  category: "ENCRYPTION"
+definition:
+  cond_type: "attribute"
+  resource_types:
+    - "aws_ebs_volume"
+  attribute: "encrypted"
+  operator: "equals"
+  value: true

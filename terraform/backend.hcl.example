@@ -1,0 +1,16 @@
+# Terraform の state の置き場所。コピーして使う：cp terraform/backend.hcl.example terraform/backend.hcl
+# backend.hcl は git の管理外。key（フォルダごとの置き場所）は scripts/tf.sh が付ける。
+#
+# バケットは management アカウントに手で作る（Terraform で作ると、その state の置き場所がなくなるため）。
+#   aws s3api create-bucket --bucket <名前> --region ap-northeast-1 \
+#     --create-bucket-configuration LocationConstraint=ap-northeast-1
+#   aws s3api put-bucket-versioning --bucket <名前> --versioning-configuration Status=Enabled
+#   aws s3api put-public-access-block --bucket <名前> --public-access-block-configuration \
+#     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+bucket  = "guardrails-tfstate-CHANGE-ME"
+region  = "ap-northeast-1"
+encrypt = true
+
+# state のロックを S3 のファイルで行う（Terraform 1.11 以降。DynamoDB はいらない）
+use_lockfile = true
