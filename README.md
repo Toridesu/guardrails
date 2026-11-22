@@ -4,8 +4,9 @@ AWS のマルチアカウント環境に、金融機関向けの基準（FISC �
 
 12 の統制（C01〜C12）を、**防止・検知・修復・証跡**の4段階で実装しています。統制と実装の対応は `controls/controls.yaml` を正として管理し、表の生成と照合を CI で自動化しています。
 
-> **状態（2026-11-22）**：コードと手元の検証までが終わったところです。AWS への適用、デモの実行、実測値はこれからです。
-> この README で「未確認」「（実測後に記入）」と書いた箇所が、それに当たります。
+> **状態（2026-11-22）：AWS 未適用版**
+> コードと、AWS に接続しない検証（[検証](#検証aws-に接続しないもの)）までが終わっています。GitHub 上の CI とブランチ保護は本物で動いていて、デモ5も実行済みです。
+> AWS への適用、デモ1〜4、実測値はこれからです。この README で「未確認」「（実測後に記入）」と書いた箇所が、それに当たります。
 
 ---
 
@@ -93,6 +94,8 @@ SCP の例外は `OrganizationAccountAccessRole` だけで、`aws:PrincipalArn` 
 
 例外があると、そのロールが抜け道になります。そこで、引き受けられたら EventBridge と SNS でメールが届くようにしました。Identity Center の管理者（AdministratorAccess）は例外に入れていないので、管理者権限を持っていても SCP で拒否されます。
 
+C01（リージョン制限）には、この例外も付けていません。管理者ロールでも東京と大阪以外では操作できないので、Terraform がメンバーアカウントに作るリソースも東京と大阪に限られます（IAM などのグローバルサービスは C01 の対象外）。
+
 ### 3. SCP と RCP は組織のルートに付ける
 
 OU ごとに分けると、付け忘れや付け間違いの余地が増えます。統制はすべてのメンバーアカウントで共通なので、ルートに付けています。SCP は management アカウントには効かないので、Terraform の実行は妨げません。
@@ -155,6 +158,47 @@ CIS 系のルール（Config の `iam-password-policy` の既定値、Checkov �
 
 ---
 
+## 検証（AWS に接続しないもの）
+
+どれも CI で毎回実行します。テストが本当に誤りを見つけるかは、コードの写しにわざと誤りを入れて確かめました。
+
+| 確認 | 中身 | 件数 | わざと入れた誤り |
+|---|---|---|---|
+| `terraform test` | 5フォルダのつながりと設定値。AWS の代わりに偽の値を返すプロバイダーを使う。ポリシー文書の中身を見る logging と remediation は、本物のプロバイダーを認証も通信もしない設定で使い、plan だけを行う | 16件 | 12通りすべてを検出 |
+| SCP・RCP の判定（簡易版） | デモ1〜3と同じ操作に、例外の管理者ロールとルートの場合を足して、ポリシーの JSON に当てて判定する（[scripts/test_policy_cases.py](scripts/test_policy_cases.py)、[tests/policy_cases.yaml](tests/policy_cases.yaml)）。10本の文が、どれも少なくとも1つのケースで拒否していることも確かめる | 24件 | 7通りすべてを検出 |
+| Checkov のサンプル | 有効な10個のチェックが、違反ありのサンプルですべて失敗し、違反なしのサンプルで1つも失敗しない | 10個 | — |
+| 対応表の照合 | controls.yaml とコードを両方向で照合し、mapping.md が最新かを確かめる | 参照44件 | 3通りすべてを検出 |
+
+わざと入れた誤りの例です。
+
+- CloudTrail の書き込み先から、組織のパスを消す
+- KMS のポリシーに、証跡の ARN を直接書く（今の名前と同じ値なので普通のテストは通るが、名前を変えるテストで見つかる）
+- 修復用ロールに、規則を追加する権限も与える
+- SCP の例外のロール名を打ち間違える
+- RCP の条件を逆にする
+
+SCP・RCP の判定は、このリポジトリのポリシーが使う書き方だけをまねた簡易版です。知らない書き方が出てきたら止まりますが、本物の評価と完全には一致しません。結果は、本物の AWS で確かめるまでの目安として扱います。
+
+### GitHub 上の記録（C11）
+
+main はブランチ保護で守っています。
+
+- CI の2つのジョブを必須にする
+- 管理者にも適用する
+- プルリクエストを必須にする（承認は0人）
+- 強制 push とブランチの削除を禁止する
+
+| PR | 中身 | CI | 判定 |
+|---|---|---|---|
+| [#1](https://github.com/Toridesu/guardrails/pull/1) | 違反あり（デモ5。スクリプトの不具合で途中で止まった） | Checkov のジョブが失敗 | BLOCKED → 閉じた |
+| [#2](https://github.com/Toridesu/guardrails/pull/2) | デモ5のスクリプトの修正 | 成功 | CLEAN → マージ |
+| [#3](https://github.com/Toridesu/guardrails/pull/3) | 違反あり（デモ5を最後まで実行） | Checkov のジョブが失敗 | BLOCKED → 閉じた |
+| [#4](https://github.com/Toridesu/guardrails/pull/4) | SCP・RCP の判定テストを足す | 成功 | CLEAN → マージ |
+
+違反を含む変更は止まり、問題のない変更は通ります。
+
+---
+
 ## 入れなかったもの
 
 | もの | 理由 |
@@ -178,6 +222,7 @@ CIS 系のルール（Config の `iam-password-policy` の既定値、Checkov �
 - Object Lock 付きのバケットに、組織証跡が書き込めるか。
 - ポート範囲（0〜1024 など）で開けたルールも、自動修復が閉じるか。
 - 拒否のエラーに、止めた層（SCP、RCP）が書かれるか。
+- 手元の判定（簡易版）と、本物の SCP・RCP の判定が一致するか（デモ1〜3で確かめる）。
 - STS のグローバルエンドポイントで引き受けられた場合も、東京の EventBridge で通知できるか。
 
 ---
@@ -216,6 +261,10 @@ python scripts/test_checkov_fixtures.py
 ```
 
 ```bash
+python scripts/test_policy_cases.py
+```
+
+```bash
 python scripts/check_mapping.py
 ```
 
@@ -223,7 +272,11 @@ python scripts/check_mapping.py
 python scripts/gen_mapping.py --check
 ```
 
-`terraform validate` は、各フォルダで `terraform init -backend=false` をしてから実行します（[.github/workflows/ci.yml](.github/workflows/ci.yml) を参照）。
+`terraform validate` と `terraform test` は、各フォルダで `terraform init -backend=false` をしてから実行します（[.github/workflows/ci.yml](.github/workflows/ci.yml) を参照）。どちらも AWS には接続しません。
+
+```bash
+terraform -chdir=terraform/policies init -backend=false && terraform -chdir=terraform/policies test
+```
 
 ### AWS に上げる
 
@@ -259,7 +312,7 @@ python scripts/gen_mapping.py --check
    ```
 
 10. メンバーアカウントのルートの認証情報を消す（ルートアクセスの一元管理。C09）。
-11. GitHub のブランチ保護で、CI の2つのジョブを必須にする（C11）。
+11. GitHub のブランチ保護で、CI の2つのジョブを必須にする（C11。このリポジトリでは設定済み）。
 
 ### デモ
 
@@ -307,13 +360,17 @@ terraform/
   detection/                Config、Config アグリゲーター、Security Hub CSPM、管理者ロールの利用通知
   remediation/              C10 の自動修復
   policies/                 SCP・RCP（scp/、rcp/ に JSON）、アカウントの既定設定（account_baseline/）
+  */tests/                  terraform test（フォルダごと。AWS には接続しない）
 checkov/                    Checkov のカスタムポリシー（CKV2_GR_Cxx_n）
-tests/fixtures/             Checkov のテスト用サンプル（bad：違反あり、good：違反なし）
+tests/
+  fixtures/                 Checkov のテスト用サンプル（bad：違反あり、good：違反なし）
+  policy_cases.yaml         SCP・RCP の判定のテストケース
 scripts/
   tf.sh                     5フォルダを順に実行する
   check_mapping.py          controls.yaml とコードの照合
   gen_mapping.py            docs/mapping.md の生成
   test_checkov_fixtures.py  Checkov の各チェックが効くかの確認
+  test_policy_cases.py      SCP・RCP で拒否されるかの判定（簡易版）
   measure_remediation.py    C10 の修復にかかった時間の計測
   demo/                     デモ1〜5
 .github/workflows/ci.yml    CI
